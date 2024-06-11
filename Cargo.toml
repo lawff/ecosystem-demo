@@ -8,3 +8,12 @@ authors = ["lawff<evilllawliet@gmail.com>"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = "1.0.86"
+axum = { version = "0.7.5", features = ["http2", "query", "tracing", "multipart"] }
+dashmap = "5.5.3"
+futures = { version = "0.3.30", default-features = false }
+tokio = { version = "1.38.0", features = ["full"] }
+tokio-stream = "0.1.15"
+tokio-util = { version = "0.7.11", features = ["codec"] }
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
