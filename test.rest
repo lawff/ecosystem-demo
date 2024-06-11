@@ -1,0 +1,10 @@
+### shorten url
+POST http://localhost:8087
+Content-Type: application/json
+
+{
+  "url": "https://excalidraw.com/"
+}
+
+### get url
+GET http://localhost:8087/kWv1Em
