@@ -25,6 +25,8 @@ enum AppError {
     Sqlx(#[from] sqlx::Error),
     #[error("invalid header value: {0}")]
     InvalidHeaderValue(#[from] InvalidHeaderValue),
+    #[error("retry limit exceeded: {0}")]
+    RetryLimitExceeded(String),
 }
 
 #[derive(Debug, Clone)]
@@ -118,6 +120,9 @@ impl AppState {
 
     async fn shorten(&self, url: &str) -> Result<String, AppError> {
         let mut id = nanoid!(6);
+        let mut retries = 0;
+        let max_retries = 5;
+
         loop {
             match sqlx::query_as::<_, RecordUrl>("INSERT INTO urls (id, url) VALUES ($1, $2) ON CONFLICT(url) DO UPDATE SET url=EXCLUDED.url RETURNING id")
               .bind(&id)
@@ -125,10 +130,20 @@ impl AppState {
               .fetch_one(&self.db)
               .await {
                 Ok(ret) => return Ok(ret.id),
-                Err(sqlx::Error::Database(_)) => {
-                    // 重试
-                    id = nanoid!(6);
-                    continue;
+                Err(sqlx::Error::Database(pg_err)) => {
+                    // 需要用到 pg_err.code().as_deref() == Some("23505") 吗? 23505 有没有更好的方式
+                    if pg_err.constraint() == Some("urls_pkey") {
+                        // 主键冲突，重试
+                        if retries < max_retries {
+                            retries += 1;
+                            id = nanoid!(6);
+                            continue;
+                        } else {
+                            return Err(AppError::RetryLimitExceeded(url.to_string()));
+                        }
+                    } else {
+                        return Err(sqlx::Error::Database(pg_err).into());
+                    }
                 }
                 Err(e) => return Err(e.into()),
               }
@@ -146,18 +161,13 @@ impl AppState {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let (status, error_message) = match self {
-            AppError::Sqlx(_) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Database error".to_string(),
-            ),
-            AppError::InvalidHeaderValue(_) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Invalid header value".to_string(),
-            ),
+        let status = match self {
+            AppError::Sqlx(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            AppError::InvalidHeaderValue(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            AppError::RetryLimitExceeded(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
 
-        let body = Json(json!({ "error": error_message }));
+        let body = Json(json!({ "error": self.to_string() }));
 
         (status, body).into_response()
     }
